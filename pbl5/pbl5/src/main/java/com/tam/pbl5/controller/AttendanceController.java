@@ -2,6 +2,7 @@ package com.tam.pbl5.controller;
 
 import com.tam.pbl5.dto.request.AttendanceCreateRequest;
 import com.tam.pbl5.dto.request.StudentCheckinRequest;
+import com.tam.pbl5.entity.Attendance;
 import com.tam.pbl5.entity.Student;
 import com.tam.pbl5.service.AttendanceService;
 import lombok.RequiredArgsConstructor;
@@ -18,16 +19,18 @@ public class AttendanceController {
     private final AttendanceService attendanceService;
 
     // ==========================================
-    // 1. API Giáo viên tạo buổi điểm danh
+    // API GIÁO VIÊN TẠO BUỔI ĐIỂM DANH MỚI
     // ==========================================
-    // Cách gọi: POST http://localhost:8080/api/attendance/create
     @PostMapping("/create")
-    public ResponseEntity<?> createAttendance(
+    public ResponseEntity<?> createAttendanceSession(
             @RequestBody AttendanceCreateRequest request,
             @RequestHeader("Authorization") String token) {
         try {
-            String message = attendanceService.createAttendanceSession(request, token);
-            return ResponseEntity.ok(message);
+            // Sửa lại thành Attendance thay vì String
+            Attendance newAttendance = attendanceService.createAttendanceSession(request, token);
+
+            // Trả về thẳng cái object mới tạo cho React (React sẽ đọc được newAttendance.id)
+            return ResponseEntity.ok(newAttendance);
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         }
@@ -39,10 +42,20 @@ public class AttendanceController {
     // Cách gọi: POST http://localhost:8080/api/attendance/checkin
     @PostMapping("/checkin")
     public ResponseEntity<?> studentCheckin(
-            @RequestBody StudentCheckinRequest request,
-            @RequestHeader("Authorization") String token) {
+            @RequestParam Integer attendanceId,
+            @RequestParam String studentUsername,
+            @RequestHeader(value = "x-api-key", required = false) String apiKey) {
+
+        // 1. Mật khẩu bí mật để bảo vệ API (Chỉ AI mới biết mã này để gửi vào Header)
+        String SECRET_AI_KEY = "PBL5_AI_Secret_Key_123456";
+
+        if (apiKey == null || !apiKey.equals(SECRET_AI_KEY)) {
+            return ResponseEntity.status(401).body("Lỗi: Sai API Key! Bạn không có quyền điểm danh.");
+        }
+
         try {
-            String message = attendanceService.studentCheckin(request, token);
+            // 2. Gọi xuống hàm duy nhất trong Service của Khang
+            String message = attendanceService.studentCheckin(attendanceId, studentUsername);
             return ResponseEntity.ok(message);
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(e.getMessage());

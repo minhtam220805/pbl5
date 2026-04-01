@@ -29,7 +29,7 @@ public class AttendanceService {
     // 1. GIÁO VIÊN TẠO BUỔI ĐIỂM DANH
     // ==========================================
     @Transactional
-    public String createAttendanceSession(AttendanceCreateRequest request, String token) {
+    public Attendance createAttendanceSession(AttendanceCreateRequest request, String token) { // ĐỔI TỪ String SANG Attendance
         if (token != null && token.startsWith("Bearer ")) token = token.substring(7);
         String username = jwtService.extractUsername(token);
         String role = jwtService.extractRole(token);
@@ -52,53 +52,47 @@ public class AttendanceService {
         attendance.setClassId(clazz.getId());
         attendance.setDatetime(request.getDatetime() != null ? request.getDatetime() : LocalDateTime.now());
 
-        attendanceRepository.save(attendance);
-        return "Đã tạo thành công buổi điểm danh cho lớp " + clazz.getName() + "!";
+        // QUAN TRỌNG NHẤT LÀ DÒNG NÀY:
+        // Lưu vào Database và TRẢ VỀ CHÍNH CUỐN SỔ VỪA TẠO (Bên trong nó đã có số ID)
+        return attendanceRepository.save(attendance);
     }
 
     // ==========================================
     // 2. SINH VIÊN TỰ ĐIỂM DANH
     // ==========================================
     @Transactional
-    public String studentCheckin(StudentCheckinRequest request, String token) {
-        // 1. Giải mã Token
-        if (token != null && token.startsWith("Bearer ")) token = token.substring(7);
-        String username = jwtService.extractUsername(token);
-        String role = jwtService.extractRole(token);
+    public String studentCheckin(Integer attendanceId, String studentUsername) {
 
-        // 2. Chỉ cho phép sinh viên
-        if (!"ROLE_STUDENT".equalsIgnoreCase(role)) {
-            throw new RuntimeException("Lỗi: Chỉ sinh viên mới được phép tự điểm danh!");
+        // 1. Tìm sinh viên dựa vào Username do con AI gửi về (KHÔNG dùng Token nữa)
+        Student student = studentRepository.findByUsername(studentUsername);
+        if (student == null) {
+            throw new RuntimeException("Lỗi: AI nhận diện ra mã '" + studentUsername + "' nhưng không có trong Database!");
         }
 
-        // 3. Tìm sinh viên dựa vào token
-        Student student = studentRepository.findByUsername(username);
-        if (student == null) throw new RuntimeException("Lỗi: Không tìm thấy hồ sơ sinh viên!");
-
-        // 4. Tìm buổi điểm danh dựa vào ID gửi từ FE
-        Attendance attendance = attendanceRepository.findById(request.getAttendanceId())
+        // 2. Tìm buổi điểm danh
+        Attendance attendance = attendanceRepository.findById(attendanceId)
                 .orElseThrow(() -> new RuntimeException("Lỗi: Buổi điểm danh không tồn tại!"));
 
-        // 5. Kiểm tra sinh viên có thực sự đang học lớp này không (Phải có status = APPROVED)
+        // 3. Kiểm tra sinh viên có trong danh sách lớp không (APPROVED)
         StudentClass studentClass = studentClassRepository.findByStudentIdAndClassId(student.getId(), attendance.getClassId());
         if (studentClass == null || !"APPROVED".equalsIgnoreCase(studentClass.getStatus())) {
-            throw new RuntimeException("Lỗi: Bạn không phải là thành viên chính thức của lớp này nên không thể điểm danh!");
+            throw new RuntimeException("Lỗi: Sinh viên " + studentUsername + " học nhầm lớp rồi!");
         }
 
-        // 6. Kiểm tra chống spam điểm danh nhiều lần
+        // 4. Kiểm tra chống spam (Camera quét 1 người nhiều lần trong 1 giây)
         if (studentAttendanceRepository.existsByAttendanceIdAndStudentId(attendance.getId(), student.getId())) {
-            throw new RuntimeException("Lỗi: Bạn đã điểm danh cho buổi học này rồi!");
+            return "Sinh viên " + studentUsername + " đã được điểm danh trước đó."; // Không quăng lỗi để AI khỏi bị crash
         }
 
-        // 7. Lưu bản ghi điểm danh
+        // 5. Lưu xuống Database
         StudentAttendance checkin = new StudentAttendance();
-        checkin.setAttendanceId(attendance.getId()); // Lấy từ bước 4 (hoặc request)
-        checkin.setStudentId(student.getId());       // Lấy từ bước 3 (Token)
-        checkin.setCheckInTime(LocalDateTime.now()); // Chữ "I" viết hoa khớp với Entity của bạn
+        checkin.setAttendanceId(attendance.getId());
+        checkin.setStudentId(student.getId());
+        checkin.setCheckInTime(LocalDateTime.now());
 
         studentAttendanceRepository.save(checkin);
 
-        return "Điểm danh thành công!";
+        return "AI Điểm danh thành công cho sinh viên: " + studentUsername;
     }
     public List<Student> getAttendedStudents(Integer attendanceId, String token) {
         // 1. Tách và giải mã Token
